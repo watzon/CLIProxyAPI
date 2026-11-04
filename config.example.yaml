@@ -129,6 +129,19 @@ access:
     - "your-api-key-1"
     - "your-api-key-2"
     - "your-api-key-3"
+  # Optional credential tags per client key, to keep separate account pools apart
+  # (for example work and personal accounts behind one proxy).
+  # Tag a credential with a top-level "tags" list in its auth JSON, e.g. "tags": ["work"],
+  # or with PATCH /v8/management/credentials/fields {"name": "<file>", "tags": ["work"]}.
+  # Rules (evaluated before routing, retries, cooldowns and session affinity):
+  #   - A tagged key only uses credentials that share at least one of its tags.
+  #   - A tagged credential is only used by keys that share one of its tags.
+  #   - Untagged keys only use untagged credentials.
+  # A request whose pool has no available credential fails; it never falls back
+  # to another pool. Keys listed here must also appear in api-keys.
+  # key-tags:
+  #   "your-api-key-1": ["work"]
+  #   "your-api-key-2": ["personal"]
 
 # Optional credential concurrency and observation contracts.
 

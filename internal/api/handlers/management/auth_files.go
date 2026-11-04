@@ -423,8 +423,8 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context, pagination authFilesPagi
 		// Read file to get type field
 		full := filepath.Join(h.cfg.AuthDir, name)
 		if data, errRead := os.ReadFile(full); errRead == nil {
-			var fieldBuf [7]ojson.Result
-			fields := ojson.GetManyBytesNoCopy(fieldBuf[:0], data, "type", "email", "project_id", "priority", coreauth.AttributeWeight, "note", "websockets")
+			var fieldBuf [8]ojson.Result
+			fields := ojson.GetManyBytesNoCopy(fieldBuf[:0], data, "type", "email", "project_id", "priority", coreauth.AttributeWeight, "note", "websockets", coreauth.CredentialTagsMetadataKey)
 			typeValue := strings.Clone(fields[0].String())
 			emailValue := strings.Clone(fields[1].String())
 			fileData["type"] = typeValue
@@ -454,6 +454,14 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context, pagination authFilesPagi
 					if weight, errWeight := credentialweight.ParseString(rawWeight); errWeight == nil {
 						fileData[coreauth.AttributeWeight] = weight
 					}
+				}
+			}
+			if tv := fields[7]; tv.Exists() {
+				if tags := coreauth.ParseCredentialTags(tv.Value()); len(tags) > 0 {
+					for i := range tags {
+						tags[i] = strings.Clone(tags[i])
+					}
+					fileData["tags"] = tags
 				}
 			}
 			if nv := fields[5]; nv.Exists() && nv.Type == ojson.String {
@@ -781,6 +789,9 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quota authFileQu
 				entry["note"] = trimmed
 			}
 		}
+	}
+	if tags := coreauth.CredentialTags(auth); len(tags) > 0 {
+		entry["tags"] = tags
 	}
 	if weight, ok := authWeightValue(auth); ok {
 		entry[coreauth.AttributeWeight] = weight

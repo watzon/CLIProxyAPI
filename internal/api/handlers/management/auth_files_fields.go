@@ -418,6 +418,19 @@ func applyAuthFileFieldsPatch(targetAuth *coreauth.Auth, req map[string]json.Raw
 			}
 		} else if rootAuthFileField(fieldPath) == coreauth.AttributeWeight {
 			return &authFileFieldPatchError{message: "weight does not support nested fields"}
+		} else if rootAuthFileField(fieldPath) == coreauth.CredentialTagsMetadataKey {
+			if fieldPath != coreauth.CredentialTagsMetadataKey {
+				return &authFileFieldPatchError{message: "tags does not support nested fields"}
+			}
+			tags, okTags := authFileTagsPatchValue(value)
+			if !okTags {
+				return &authFileFieldPatchError{message: "tags must be a string array or null"}
+			}
+			if len(tags) == 0 {
+				delete(targetAuth.Metadata, coreauth.CredentialTagsMetadataKey)
+			} else {
+				targetAuth.Metadata[coreauth.CredentialTagsMetadataKey] = tags
+			}
 		} else if fieldPath == "headers" {
 			applyAuthFileHeadersPatch(targetAuth, value)
 		} else if errSet := setAuthFileMetadataValue(targetAuth.Metadata, fieldPath, value); errSet != nil {
@@ -560,6 +573,24 @@ func rootAuthFileField(path string) string {
 		return strings.TrimSpace(path[:idx])
 	}
 	return path
+}
+
+// authFileTagsPatchValue validates a tags patch value. It accepts null or a list of
+// strings and returns the normalized tags; an empty result clears the field.
+func authFileTagsPatchValue(value any) ([]string, bool) {
+	if value == nil {
+		return nil, true
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	for _, item := range items {
+		if _, okString := item.(string); !okString {
+			return nil, false
+		}
+	}
+	return coreauth.ParseCredentialTags(items), true
 }
 
 func setAuthFileMetadataValue(metadata map[string]any, path string, value any) error {
