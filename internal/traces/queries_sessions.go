@@ -109,10 +109,24 @@ func (s *Service) collectSessions(ctx context.Context, f store.TurnFilter, inclu
 	return list, nil
 }
 
+// projectSourceView maps a stored source to the API enum. Rows written before
+// the re-derive job ran may still hold the old spellings or nothing.
+func projectSourceView(source string) string {
+	switch source {
+	case SourceHeader, SourcePath, SourceRule, SourceRemote, SourceFolder, SourceInherited, SourceNone:
+		return source
+	case "git":
+		return SourceRemote
+	case legacySourceInherit:
+		return SourceInherited
+	}
+	return SourceNone
+}
+
 func (s *Service) sessionView(a *sessionAgg) SessionView {
 	sess := a.sess
 	v := SessionView{
-		ID: sess.ID, Title: sess.Title, Project: sess.ProjectName, Folder: sess.Folder,
+		ID: sess.ID, Title: sess.Title, Project: sess.ProjectName, ProjectSource: projectSourceView(sess.ProjectSource), Folder: sess.Folder,
 		Client: sess.Client, ClientVersion: sess.ClientVersion, Model: a.agg.topModel(), KeyLabel: sess.KeyLabel,
 		Tags: sess.Tags, Machine: sess.Machine, Turns: a.agg.turns, Tokens: a.agg.tokens, CostUSD: a.agg.costPtr(),
 		ActiveMs: a.agg.activeMs, ModelMs: a.agg.modelMs, Errors: a.errs, Subagents: len(a.subs),

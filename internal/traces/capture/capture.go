@@ -15,15 +15,20 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/traces/extract"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
 )
 
 // Client headers that steer trace derivation. They are read by the proxy and
-// never forwarded upstream.
+// never forwarded upstream. Every request header that starts with HeaderPrefix
+// is removed before the request is routed, known or not.
 const (
-	HeaderProject = "X-CPA-Project"
-	HeaderCwd     = "X-CPA-Cwd"
-	HeaderClient  = "X-CPA-Client"
+	HeaderPrefix      = "X-CPA-"
+	HeaderProject     = extract.HeaderProject
+	HeaderCwd         = extract.HeaderCwd
+	HeaderClient      = extract.HeaderClient
+	HeaderGitRemote   = extract.HeaderGitRemote
+	HeaderPathProject = extract.HeaderPathProject
 )
 
 // maxRequestCapture bounds the request body copied per turn. A larger body is
@@ -303,6 +308,8 @@ var storedHeaderNames = []string{
 	HeaderProject,
 	HeaderCwd,
 	HeaderClient,
+	HeaderGitRemote,
+	HeaderPathProject,
 	"X-Claude-Code-Session-Id",
 	"X-Claude-Code-Agent-Id",
 	"X-Claude-Code-Parent-Agent-Id",

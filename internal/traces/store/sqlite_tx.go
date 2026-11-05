@@ -23,21 +23,22 @@ func (t *sqliteTx) GetSession(id string) (*Session, error) {
 }
 
 func (t *sqliteTx) UpsertSession(s *Session) error {
-	_, err := t.tx.ExecContext(bg, `INSERT INTO sessions (`+sessionCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	_, err := t.tx.ExecContext(bg, `INSERT INTO sessions (`+sessionCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET root_id=excluded.root_id, parent_id=excluded.parent_id, title=excluded.title, project_id=excluded.project_id,
 project_name=excluded.project_name, project_key=excluded.project_key, project_source=excluded.project_source, project_rule=excluded.project_rule,
-header_project=excluded.header_project, folder=excluded.folder, git_remote=excluded.git_remote, client_project_hash=excluded.client_project_hash,
+header_project=excluded.header_project, path_project=excluded.path_project, folder=excluded.folder, git_remote=excluded.git_remote, client_project_hash=excluded.client_project_hash,
 client=excluded.client, client_version=excluded.client_version, key_label=excluded.key_label, tags=excluded.tags, machine=excluded.machine,
 client_ip=excluded.client_ip, device_id=excluded.device_id, model=excluded.model, synthetic=excluded.synthetic, started_at=excluded.started_at, last_at=excluded.last_at`,
-		s.ID, s.RootID, s.ParentID, s.Title, s.ProjectID, s.ProjectName, s.ProjectKey, s.ProjectSource, s.ProjectRule, s.HeaderProject, s.Folder, s.GitRemote, s.ClientProjectHash,
+		s.ID, s.RootID, s.ParentID, s.Title, s.ProjectID, s.ProjectName, s.ProjectKey, s.ProjectSource, s.ProjectRule, s.HeaderProject, s.PathProject, s.Folder, s.GitRemote, s.ClientProjectHash,
 		s.Client, s.ClientVersion, s.KeyLabel, encodeList(s.Tags), s.Machine, s.ClientIP, s.DeviceID, s.Model, boolInt(s.Synthetic), ms(s.StartedAt), ms(s.LastAt))
 	return err
 }
 
-func (t *sqliteTx) FindSyntheticSession(keyLabel, client, folder string, since time.Time) (string, error) {
+func (t *sqliteTx) FindSyntheticSession(k SyntheticKey, since time.Time) (string, error) {
 	var id string
-	err := t.tx.QueryRowContext(bg, `SELECT id FROM sessions WHERE synthetic = 1 AND key_label = ? AND client = ? AND folder = ? AND last_at >= ? ORDER BY last_at DESC LIMIT 1`,
-		keyLabel, client, folder, ms(since)).Scan(&id)
+	err := t.tx.QueryRowContext(bg, `SELECT id FROM sessions WHERE synthetic = 1 AND key_label = ? AND client = ? AND folder = ? AND header_project = ? AND path_project = ?
+AND (folder != '' OR git_remote = ?) AND last_at >= ? ORDER BY last_at DESC LIMIT 1`,
+		k.KeyLabel, k.Client, k.Folder, k.HeaderProject, k.PathProject, k.GitRemote, ms(since)).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

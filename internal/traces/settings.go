@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -54,8 +55,24 @@ prices:
   overrides: []
 projects:
   rules: []
+  worktree-dirs:
+    - "~/.t3/scratch/*"
+    - "~/.claude/worktrees/*"
+    - "~/.codex/worktrees/*"
+    - "*/.worktrees/*"
+    - "*/.claude/worktrees/*"
 client-labels: {}
 `
+
+// DefaultWorktreeDirs is the built-in traces.projects.worktree-dirs list. It
+// must match DefaultConfigYAML.
+var DefaultWorktreeDirs = []string{
+	"~/.t3/scratch/*",
+	"~/.claude/worktrees/*",
+	"~/.codex/worktrees/*",
+	"*/.worktrees/*",
+	"*/.claude/worktrees/*",
+}
 
 // Settings is the parsed traces configuration.
 type Settings struct {
@@ -73,6 +90,7 @@ type Settings struct {
 	PriceRefresh     time.Duration
 	Overrides        []price.Override
 	Rules            []ProjectRule
+	Worktrees        []WorktreePattern
 	ClientLabels     []clientLabel
 	KeyTags          map[string][]string
 }
@@ -106,6 +124,7 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 		RedactSecrets:    true,
 		PriceSource:      DefaultPriceSource,
 		PriceRefresh:     DefaultPriceRefresh,
+		Worktrees:        CompileWorktreeDirs(DefaultWorktreeDirs),
 	}
 	if cfg == nil {
 		return s
@@ -156,6 +175,9 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 		})
 	}
 	s.Rules = CompileRules(t.Projects.Rules)
+	if t.Projects.WorktreeDirs != nil {
+		s.Worktrees = CompileWorktreeDirs(*t.Projects.WorktreeDirs)
+	}
 	s.ClientLabels = compileClientLabels(t.ClientLabels)
 	s.KeyTags = map[string][]string{}
 	for key, tags := range cfg.APIKeyTags {
@@ -285,6 +307,85 @@ func CompileRules(rules []config.TracesProjectRule) []ProjectRule {
 		out = append(out, pr)
 	}
 	return out
+}
+
+// WorktreePattern is a compiled traces.projects.worktree-dirs entry.
+type WorktreePattern struct {
+	segments []string
+	// floating patterns match at any depth of the folder.
+	floating bool
+}
+
+// CompileWorktreeDirs prepares worktree container patterns. Patterns are
+// normalized like folders. A pattern that starts with "*/" floats: it matches
+// the run of segments anywhere in a folder, so "*/.worktrees/*" covers
+// ~/code/app/.worktrees/feature.
+func CompileWorktreeDirs(patterns []string) []WorktreePattern {
+	var out []WorktreePattern
+	for _, raw := range patterns {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		norm := extract.NormalizePath(raw)
+		floating := strings.HasPrefix(norm, "*/")
+		var segments []string
+		for _, seg := range strings.Split(norm, "/") {
+			if seg != "" {
+				segments = append(segments, seg)
+			}
+		}
+		if floating {
+			segments = segments[1:]
+		}
+		if len(segments) == 0 {
+			continue
+		}
+		out = append(out, WorktreePattern{segments: segments, floating: floating})
+	}
+	return out
+}
+
+// matchesAt reports whether the pattern segments match folder segments from start.
+func (w WorktreePattern) matchesAt(folder []string, start int) bool {
+	if start+len(w.segments) > len(folder) {
+		return false
+	}
+	for i, pat := range w.segments {
+		if ok, err := path.Match(pat, folder[start+i]); err != nil || !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// IsWorktreeFolder reports whether folder is inside a worktree container.
+// A folder deeper than the container counts too.
+func (s Settings) IsWorktreeFolder(folder string) bool {
+	if folder == "" || len(s.Worktrees) == 0 {
+		return false
+	}
+	var segments []string
+	for _, seg := range strings.Split(folder, "/") {
+		if seg != "" {
+			segments = append(segments, seg)
+		}
+	}
+	for _, w := range s.Worktrees {
+		if !w.floating {
+			if w.matchesAt(segments, 0) {
+				return true
+			}
+			continue
+		}
+		// A floating pattern needs at least one folder segment in front of it.
+		for start := 1; start < len(segments); start++ {
+			if w.matchesAt(segments, start) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Apply returns the project name for folder, or false when the rule does not match.

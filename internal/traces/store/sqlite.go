@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	project_source TEXT NOT NULL DEFAULT '',
 	project_rule TEXT NOT NULL DEFAULT '',
 	header_project TEXT NOT NULL DEFAULT '',
+	path_project TEXT NOT NULL DEFAULT '',
 	folder TEXT NOT NULL DEFAULT '',
 	git_remote TEXT NOT NULL DEFAULT '',
 	client_project_hash TEXT NOT NULL DEFAULT '',
@@ -185,6 +186,49 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 `
 
+// columnMigrations add columns that older databases lack. CREATE TABLE IF NOT
+// EXISTS leaves an existing table as it is, so each column is added when
+// missing. Every entry must also be in the schema above.
+var columnMigrations = []struct{ table, column, def string }{
+	{"sessions", "project_source", "TEXT NOT NULL DEFAULT ''"},
+	{"sessions", "path_project", "TEXT NOT NULL DEFAULT ''"},
+}
+
+// migrate brings a database created by an older version up to the schema.
+func migrate(ctx context.Context, db *sql.DB) error {
+	for _, m := range columnMigrations {
+		has, err := hasColumn(ctx, db, m.table, m.column)
+		if err != nil {
+			return fmt.Errorf("migrate trace schema: %w", err)
+		}
+		if has {
+			continue
+		}
+		if _, err = db.ExecContext(ctx, "ALTER TABLE "+m.table+" ADD COLUMN "+m.column+" "+m.def); err != nil {
+			return fmt.Errorf("migrate trace schema: add %s.%s: %w", m.table, m.column, err)
+		}
+	}
+	return nil
+}
+
+func hasColumn(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.QueryContext(ctx, "SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return false, err
+	}
+	defer closeRows(rows)
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			return false, err
+		}
+		if strings.EqualFold(name, column) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
 // SQLite is the SQLite Store.
 type SQLite struct {
 	db   *sql.DB
@@ -221,6 +265,10 @@ func OpenSQLite(dir string) (*SQLite, error) {
 	if _, err = db.ExecContext(ctx, schema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("create trace schema: %w", err)
+	}
+	if err = migrate(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	if err = os.Chmod(path, 0o600); err != nil {
 		log.WithError(err).Debug("traces: could not set database file permissions")
@@ -351,14 +399,14 @@ type queryer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-const sessionCols = `id, root_id, parent_id, title, project_id, project_name, project_key, project_source, project_rule, header_project, folder, git_remote, client_project_hash, client, client_version, key_label, tags, machine, client_ip, device_id, model, synthetic, started_at, last_at`
+const sessionCols = `id, root_id, parent_id, title, project_id, project_name, project_key, project_source, project_rule, header_project, path_project, folder, git_remote, client_project_hash, client, client_version, key_label, tags, machine, client_ip, device_id, model, synthetic, started_at, last_at`
 
 func scanSession(row scanner) (*Session, error) {
 	var s Session
 	var tags string
 	var synthetic int
 	var started, last int64
-	if err := row.Scan(&s.ID, &s.RootID, &s.ParentID, &s.Title, &s.ProjectID, &s.ProjectName, &s.ProjectKey, &s.ProjectSource, &s.ProjectRule, &s.HeaderProject, &s.Folder, &s.GitRemote, &s.ClientProjectHash, &s.Client, &s.ClientVersion, &s.KeyLabel, &tags, &s.Machine, &s.ClientIP, &s.DeviceID, &s.Model, &synthetic, &started, &last); err != nil {
+	if err := row.Scan(&s.ID, &s.RootID, &s.ParentID, &s.Title, &s.ProjectID, &s.ProjectName, &s.ProjectKey, &s.ProjectSource, &s.ProjectRule, &s.HeaderProject, &s.PathProject, &s.Folder, &s.GitRemote, &s.ClientProjectHash, &s.Client, &s.ClientVersion, &s.KeyLabel, &tags, &s.Machine, &s.ClientIP, &s.DeviceID, &s.Model, &synthetic, &started, &last); err != nil {
 		return nil, err
 	}
 	s.Tags = decodeList(tags)

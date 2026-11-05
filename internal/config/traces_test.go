@@ -34,6 +34,8 @@ const tracesBlock = `traces:
     rules:
       - match: "~/code/{name}"
         project: "{name}"
+    worktree-dirs:
+      - "~/wt/*"
   client-labels:
     "10.0.0.5": desk
 `
@@ -57,6 +59,9 @@ func TestTracesBlockLoadsFromV8AndLegacyLayouts(t *testing.T) {
 			}
 			if len(tr.Prices.Overrides) != 1 || *tr.Prices.Overrides[0].Output != 0.5 || tr.Prices.Overrides[0].CacheRead != nil {
 				t.Errorf("overrides = %+v", tr.Prices.Overrides)
+			}
+			if wt := tr.Projects.WorktreeDirs; wt == nil || len(*wt) != 1 || (*wt)[0] != "~/wt/*" {
+				t.Errorf("worktree-dirs = %v", wt)
 			}
 			if len(tr.Projects.Rules) != 1 || tr.Projects.Rules[0].Project != "{name}" || tr.ClientLabels["10.0.0.5"] != "desk" {
 				t.Errorf("rules/labels = %+v %+v", tr.Projects.Rules, tr.ClientLabels)
@@ -121,5 +126,29 @@ func TestEmptyTracesBlockIsNotWritten(t *testing.T) {
 	}
 	if saved, _ := os.ReadFile(path); strings.Contains(string(saved), "traces") {
 		t.Fatalf("an unconfigured traces block was written:\n%s", saved)
+	}
+}
+
+func TestTracesWorktreeDirsUnsetAndEmpty(t *testing.T) {
+	unset, err := ParseConfigBytes([]byte("traces:\n  enabled: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unset.Traces.Projects.WorktreeDirs != nil {
+		t.Errorf("unset worktree-dirs = %v, want nil so the defaults apply", unset.Traces.Projects.WorktreeDirs)
+	}
+	empty, err := ParseConfigBytes([]byte("traces:\n  projects:\n    worktree-dirs: []\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.Traces.Projects.WorktreeDirs == nil || len(*empty.Traces.Projects.WorktreeDirs) != 0 {
+		t.Fatalf("empty worktree-dirs = %v, want a non-nil empty list", empty.Traces.Projects.WorktreeDirs)
+	}
+	if clone := empty.CloneForRuntime(); clone.Traces.Projects.WorktreeDirs == nil {
+		t.Errorf("clone lost the empty worktree-dirs list")
+	}
+	saved, err := yaml.Marshal(empty.Traces)
+	if err != nil || !strings.Contains(string(saved), "worktree-dirs: []") {
+		t.Errorf("an empty list must survive a save: %s %v", saved, err)
 	}
 }

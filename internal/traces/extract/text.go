@@ -16,8 +16,26 @@ var (
 	reCommandArgs   = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
 )
 
+// compactionPrefix starts the first prompt of a session that the client
+// continued after it ran out of context. It is a summary, not a user prompt.
+const compactionPrefix = "This session is being continued from a previous conversation"
+
+// injectedPrefixes start user text that clients inject. It is context, not a
+// prompt the user typed.
+var injectedPrefixes = []string{
+	"SessionStart hook additional context",
+	"# Environment update",
+}
+
+// IsCompactionText reports whether text is the summary prompt that a client
+// sends after it compacted a conversation.
+func IsCompactionText(text string) bool {
+	return strings.HasPrefix(strings.TrimSpace(text), compactionPrefix)
+}
+
 // Title returns the first line of the first user prompt, without client
-// wrappers, cut to MaxTitleLength characters.
+// wrappers, cut to MaxTitleLength characters. Compaction summaries and
+// injected context never become the title.
 func Title(messages []Message) string {
 	for _, msg := range messages {
 		for _, b := range msg.Blocks {
@@ -43,8 +61,13 @@ func titleFromText(text string) string {
 		cleaned = command
 	}
 	trimmed := strings.TrimSpace(cleaned)
-	if trimmed == "" || trimmed == "[image]" || strings.HasPrefix(trimmed, "# AGENTS.md instructions") {
+	if trimmed == "" || trimmed == "[image]" || strings.HasPrefix(trimmed, "# AGENTS.md instructions") || IsCompactionText(trimmed) {
 		return ""
+	}
+	for _, prefix := range injectedPrefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			return ""
+		}
 	}
 	for _, line := range strings.Split(trimmed, "\n") {
 		line = strings.Join(strings.Fields(line), " ")

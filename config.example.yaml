@@ -1276,8 +1276,10 @@ observability:
 # conversation (messages, tool calls, diffs, errors, retries). Off by default.
 # The Management API serves them under /v8/management/traces. Every key except
 # dir applies on hot reload. Recording never blocks or fails a client request.
-# Clients may send X-CPA-Project, X-CPA-Cwd and X-CPA-Client; the proxy reads them
-# and never forwards them upstream.
+# Clients may send X-CPA-Project, X-CPA-Cwd, X-CPA-Git-Remote and X-CPA-Client, or
+# name the project in the base URL (/p/<project>). The proxy reads them and never
+# forwards any X-CPA-* header upstream. Project resolution order, client setup and
+# examples: docs/traces.md
 traces:
   enabled: false
   # Database folder. A relative path is under auth-dir. The proxy creates it with
@@ -1326,6 +1328,16 @@ traces:
     #   - match: "~/code/{name}"
     #     project: "{name}"
     rules: []
+    # Folders inside these worktree containers do not name a project. The session
+    # keeps the folder, and the project is "unassigned" unless a rule, a header, the
+    # base URL or a git remote names one. "*" matches one folder name; a pattern that
+    # starts with "*/" matches at any depth. [] turns the check off.
+    worktree-dirs:
+      - "~/.t3/scratch/*"
+      - "~/.claude/worktrees/*"
+      - "~/.codex/worktrees/*"
+      - "*/.worktrees/*"
+      - "*/.claude/worktrees/*"
   # Machine labels by client IP or CIDR, for example:
   # client-labels:
   #   "10.0.0.5": "desk"

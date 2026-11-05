@@ -42,6 +42,7 @@ type Session struct {
 	ProjectSource     string
 	ProjectRule       string
 	HeaderProject     string
+	PathProject       string
 	Folder            string
 	GitRemote         string
 	ClientProjectHash string
@@ -215,11 +216,23 @@ type Stats struct {
 	OldestTurnAt *time.Time
 }
 
+// SyntheticKey identifies the synthetic session of a request that carries no
+// session ID. Different project hints never share a session.
+type SyntheticKey struct {
+	KeyLabel, Client, Folder string
+	HeaderProject            string
+	PathProject              string
+	// GitRemote only counts when Folder is empty.
+	GitRemote string
+}
+
 // Tx is the write side, used by the single writer goroutine.
 type Tx interface {
 	GetSession(id string) (*Session, error)
 	UpsertSession(s *Session) error
-	FindSyntheticSession(keyLabel, client, folder string, since time.Time) (string, error)
+	// FindSyntheticSession finds the latest synthetic session of the same client
+	// key, client, folder and explicit project hints that was active since.
+	FindSyntheticSession(key SyntheticKey, since time.Time) (string, error)
 	MaxSeq(sessionID string) (int, error)
 	InsertTurn(t *Turn) error
 	GetTurn(id string) (*Turn, error)

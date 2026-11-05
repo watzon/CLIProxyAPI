@@ -112,9 +112,12 @@ type ProjectsResponse struct {
 
 // SessionView is the S object.
 type SessionView struct {
-	ID            string       `json:"id"`
-	Title         string       `json:"title"`
-	Project       string       `json:"project"`
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Project string `json:"project"`
+	// ProjectSource says how the project was chosen: header, path, rule, remote,
+	// folder, inherited or none.
+	ProjectSource string       `json:"project_source"`
 	Folder        string       `json:"folder"`
 	Client        string       `json:"client"`
 	ClientVersion string       `json:"client_version"`

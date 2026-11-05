@@ -26,7 +26,19 @@ type Derived struct {
 	ClientProjectHash string
 	DeviceID          string
 	HeaderProject     string
+	// PathProject is the project named in the base URL (/p/<project>).
+	PathProject string
 }
+
+// Client header names read by Derive. The proxy never forwards them upstream.
+const (
+	HeaderProject   = "X-CPA-Project"
+	HeaderCwd       = "X-CPA-Cwd"
+	HeaderClient    = "X-CPA-Client"
+	HeaderGitRemote = "X-CPA-Git-Remote"
+	// HeaderPathProject is set by the proxy itself from the /p/<project> base URL.
+	HeaderPathProject = "X-CPA-Path-Project"
+)
 
 // FolderExtractor finds the working folder (and git remote) of a request.
 type FolderExtractor func(headers http.Header, req *Request) (folder, remote string)
@@ -47,16 +59,18 @@ func Derive(headers http.Header, req *Request) Derived {
 	}
 	var d Derived
 	d.Client, d.ClientVersion = DetectClient(headers)
-	d.HeaderProject = strings.TrimSpace(headers.Get("X-CPA-Project"))
-	if extractor := folderExtractors[d.Client]; extractor != nil && req != nil {
-		folder, remote := extractor(headers, req)
-		d.Folder = NormalizePath(folder)
-		d.GitRemote = NormalizeGitRemote(remote)
+	d.HeaderProject = strings.TrimSpace(headers.Get(HeaderProject))
+	d.PathProject = strings.TrimSpace(headers.Get(HeaderPathProject))
+	if req != nil {
+		d.Folder, d.GitRemote = DeriveFolder(d.Client, headers, req)
 	}
-	if cwd := strings.TrimSpace(headers.Get("X-CPA-Cwd")); cwd != "" {
+	if cwd := strings.TrimSpace(headers.Get(HeaderCwd)); cwd != "" {
 		d.Folder = NormalizePath(cwd)
 	}
-	if label := strings.TrimSpace(headers.Get("X-CPA-Client")); label != "" {
+	if remote := NormalizeGitRemote(headers.Get(HeaderGitRemote)); remote != "" {
+		d.GitRemote = remote
+	}
+	if label := strings.TrimSpace(headers.Get(HeaderClient)); label != "" {
 		d.Client = label
 	}
 	if d.Client == ClientOpenCode || headers.Get("X-Opencode-Project") != "" {
@@ -67,6 +81,24 @@ func Derive(headers http.Header, req *Request) Derived {
 	}
 	return d
 }
+
+// DeriveFolder returns the normalized working folder and git remote that the
+// client's own extractor finds in a request. Clients without an extractor
+// give empty values.
+func DeriveFolder(client string, headers http.Header, req *Request) (folder, remote string) {
+	extractor := folderExtractors[client]
+	if extractor == nil || req == nil {
+		return "", ""
+	}
+	if headers == nil {
+		headers = http.Header{}
+	}
+	f, r := extractor(headers, req)
+	return NormalizePath(cleanFolderText(f)), NormalizeGitRemote(r)
+}
+
+// HasFolderExtractor reports whether Derive can find a folder for the client.
+func HasFolderExtractor(client string) bool { return folderExtractors[client] != nil }
 
 // DetectClient maps User-Agent and originator headers to a client label and version.
 func DetectClient(headers http.Header) (string, string) {
@@ -106,7 +138,19 @@ var (
 	reWorkingDir       = regexp.MustCompile(`(?m)Working directory:\s*(.+?)\s*$`)
 	reOMPDir           = regexp.MustCompile(`current working directory:\s*'([^']+)'`)
 	reCodexCwd         = regexp.MustCompile(`<cwd>\s*([^<]+?)\s*</cwd>`)
+	// reFolderWas matches the " (was X)" tail of an "# Environment update" line.
+	reFolderWas = regexp.MustCompile(`^(.*?)\s+\(was\s+(.+)\)$`)
 )
+
+// cleanFolderText removes the " (was X)" tail of an environment update line.
+// X is the folder before the shell moved, so it replaces the new folder.
+func cleanFolderText(text string) string {
+	text = strings.TrimSpace(text)
+	if m := reFolderWas.FindStringSubmatch(text); m != nil {
+		return strings.TrimSpace(m[2])
+	}
+	return text
+}
 
 func claudeCodeFolder(_ http.Header, req *Request) (string, string) {
 	system := req.SystemText()
@@ -119,7 +163,26 @@ func claudeCodeFolder(_ http.Header, req *Request) (string, string) {
 	if m := reWorkingDir.FindStringSubmatch(system); m != nil {
 		return m[1], ""
 	}
-	return "", ""
+	return claudeMessageFolder(req), ""
+}
+
+// claudeMessageFolder finds the folder of an SDK session. The SDK sends no
+// "Primary working directory" line in the system prompt. The line arrives in
+// user text instead: in the SessionStart hook context, and in every
+// "# Environment update" when the shell changes folder. The earliest line
+// wins, and a " (was X)" tail names the older folder X.
+func claudeMessageFolder(req *Request) string {
+	for _, msg := range req.Messages {
+		for _, b := range msg.Blocks {
+			if b.Kind != KindUser {
+				continue
+			}
+			if m := reClaudePrimaryDir.FindStringSubmatch(b.Text); m != nil {
+				return cleanFolderText(m[1])
+			}
+		}
+	}
+	return ""
 }
 
 func ompFolder(_ http.Header, req *Request) (string, string) {

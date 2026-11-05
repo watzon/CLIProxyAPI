@@ -61,6 +61,11 @@ type TracesPriceOverride struct {
 // TracesProjectsConfig holds ordered folder to project rules.
 type TracesProjectsConfig struct {
 	Rules []TracesProjectRule `yaml:"rules,omitempty" json:"rules,omitempty"`
+	// WorktreeDirs lists folder patterns of worktree containers. A session folder
+	// under one of them does not name a project. "*" matches one path segment;
+	// a pattern that starts with "*/" matches at any depth. When unset the built-in
+	// list applies; an empty list turns the check off.
+	WorktreeDirs *[]string `yaml:"worktree-dirs,omitempty" json:"worktree-dirs,omitempty"`
 }
 
 // TracesProjectRule maps a folder pattern to a project name. "{name}" in Match

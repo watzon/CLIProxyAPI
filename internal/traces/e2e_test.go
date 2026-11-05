@@ -48,11 +48,22 @@ func sse(events ...string) string {
 // executors make, with tool calls and plan-limit headers.
 func fakeUpstream(t *testing.T) *httptest.Server {
 	t.Helper()
+	srv, _ := recordingUpstream(t)
+	return srv
+}
+
+// recordingUpstream is fakeUpstream plus a view of the headers of every request it got.
+func recordingUpstream(t *testing.T) (*httptest.Server, func() []http.Header) {
+	t.Helper()
 	var mu sync.Mutex
 	claudeCalls := 0
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var seen []http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		_ = body
+		mu.Lock()
+		seen = append(seen, r.Header.Clone())
+		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
 		switch {
 		case strings.Contains(r.URL.Path, "/messages"):
@@ -99,6 +110,11 @@ func fakeUpstream(t *testing.T) *httptest.Server {
 			http.NotFound(w, r)
 		}
 	}))
+	return srv, func() []http.Header {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]http.Header(nil), seen...)
+	}
 }
 
 func newE2EServer(t *testing.T, upstream string) *api.Server {
@@ -179,17 +195,18 @@ func mgmtGet(t *testing.T, h http.Handler, path string, out any) {
 }
 
 type e2eSession struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	Project      string `json:"project"`
-	Folder       string `json:"folder"`
-	Client       string `json:"client"`
-	Turns        int    `json:"turns"`
-	FilesChanged int    `json:"files_changed"`
-	LinesAdded   int    `json:"lines_added"`
-	LinesRemoved int    `json:"lines_removed"`
-	DeviceID     *string
-	CostUSD      *float64 `json:"cost_usd"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Project       string `json:"project"`
+	ProjectSource string `json:"project_source"`
+	Folder        string `json:"folder"`
+	Client        string `json:"client"`
+	Turns         int    `json:"turns"`
+	FilesChanged  int    `json:"files_changed"`
+	LinesAdded    int    `json:"lines_added"`
+	LinesRemoved  int    `json:"lines_removed"`
+	DeviceID      *string
+	CostUSD       *float64 `json:"cost_usd"`
 }
 
 type e2eTurn struct {
@@ -450,5 +467,85 @@ func TestTracesEndToEnd(t *testing.T) {
 	mgmtGet(t, h, "/traces/health", &health)
 	if !health.Enabled || health.Capture != "full" {
 		t.Errorf("health = %+v", health)
+	}
+}
+
+func claudeCodeBody(prompt string) string {
+	return `{"model":"` + claudeModel + `","stream":true,"max_tokens":64,"system":"plain","messages":[{"role":"user","content":"` + prompt + `"}]}`
+}
+
+// TestTracesClientHintsOverHTTP covers the optional client hints: the
+// /p/<project> base URL, X-CPA-Git-Remote, and the removal of every X-CPA-*
+// header before the upstream call.
+func TestTracesClientHintsOverHTTP(t *testing.T) {
+	upstream, upstreamHeaders := recordingUpstream(t)
+	defer upstream.Close()
+	server := newE2EServer(t, upstream.URL)
+	h := server.Handler()
+	headers := func(extra map[string]string) map[string]string {
+		out := map[string]string{
+			"Authorization": "Bearer " + e2eClientKey,
+			"User-Agent":    "claude-cli/2.1.318 (external, cli)",
+		}
+		for k, v := range extra {
+			out[k] = v
+		}
+		return out
+	}
+
+	// /p/<project>/v1/messages routes like /v1/messages and names the project.
+	code, body := doJSON(t, h, http.MethodPost, "/p/path-app/v1/messages", claudeCodeBody("prompt via path"), headers(nil))
+	if code != http.StatusOK || !strings.Contains(string(body), "toolu_1") {
+		t.Fatalf("/p/path-app/v1/messages = %d: %s", code, body)
+	}
+	s := findSession(t, h, "prompt via path")
+	if s.Project != "path-app" || s.ProjectSource != "path" {
+		t.Errorf("path session = %+v", s)
+	}
+
+	// X-CPA-Git-Remote names the project through the remote, and an unknown
+	// X-CPA-* header is dropped too.
+	extra := map[string]string{"X-CPA-Git-Remote": "git@github.com:Acme/Remote-App.git", "X-CPA-Anything": "secret", "X-CPA-Cwd": "/Users/dev/code/some-folder"}
+	if code, body = doJSON(t, h, http.MethodPost, "/v1/messages", claudeCodeBody("prompt via remote"), headers(extra)); code != http.StatusOK {
+		t.Fatalf("remote request = %d: %s", code, body)
+	}
+	s = findSession(t, h, "prompt via remote")
+	if s.Project != "Remote-App" || s.ProjectSource != "remote" || s.Folder != "~/code/some-folder" {
+		t.Errorf("remote session = %+v", s)
+	}
+
+	// X-CPA-Project wins over the path.
+	if code, body = doJSON(t, h, http.MethodPost, "/p/path-app/v1/messages", claudeCodeBody("prompt via header"), headers(map[string]string{"X-CPA-Project": "from-header"})); code != http.StatusOK {
+		t.Fatalf("header request = %d: %s", code, body)
+	}
+	if s = findSession(t, h, "prompt via header"); s.Project != "from-header" || s.ProjectSource != "header" {
+		t.Errorf("header session = %+v", s)
+	}
+
+	for _, got := range upstreamHeaders() {
+		for name := range got {
+			if strings.HasPrefix(strings.ToUpper(name), "X-CPA-") {
+				t.Errorf("header %s reached the upstream", name)
+			}
+		}
+	}
+
+	// A client without a way to send headers still works on the old routes.
+	if code, body = doJSON(t, h, http.MethodPost, "/p//v1/messages", claudeCodeBody("x"), headers(nil)); code != http.StatusBadRequest {
+		t.Errorf("empty project name = %d: %s", code, body)
+	}
+	// Management stays where it is and never takes the prefix.
+	var health struct {
+		Enabled bool `json:"enabled"`
+	}
+	mgmtGet(t, h, "/traces/health", &health)
+	if !health.Enabled {
+		t.Errorf("management health = %+v", health)
+	}
+	if code, _ = doJSON(t, h, http.MethodGet, "/p/path-app/v8/management/traces/health", "", map[string]string{"Authorization": "Bearer " + e2eMgmtSecret}); code != http.StatusNotFound {
+		t.Errorf("prefixed management = %d, want 404", code)
+	}
+	if code, _ = doJSON(t, h, http.MethodGet, "/p/path-app/healthz", "", nil); code != http.StatusOK {
+		t.Errorf("prefixed healthz = %d, want 200", code)
 	}
 }

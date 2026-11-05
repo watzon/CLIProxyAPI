@@ -46,8 +46,11 @@ func (s *Service) ingestTurn(tx store.Tx, settings Settings, ev *capture.TurnEve
 	if err != nil {
 		return err
 	}
-	if sess.Title == "" {
+	if sess.Title == "" || extract.IsCompactionText(sess.Title) {
 		title := extract.Title(req.Messages)
+		if title == "" {
+			title = sess.Title
+		}
 		if settings.RedactSecrets {
 			title = extract.Redact(title)
 		}
@@ -56,9 +59,11 @@ func (s *Service) ingestTurn(tx store.Tx, settings Settings, ev *capture.TurnEve
 	if derived.Folder != "" {
 		sess.Folder = derived.Folder
 	}
-	if derived.GitRemote != "" && sess.Folder != "" {
-		if errRemote := tx.SetFolderRemote(sess.Folder, derived.GitRemote); errRemote != nil {
-			return errRemote
+	if derived.GitRemote != "" {
+		if sess.Folder != "" {
+			if errRemote := tx.SetFolderRemote(sess.Folder, derived.GitRemote); errRemote != nil {
+				return errRemote
+			}
 		}
 		sess.GitRemote = derived.GitRemote
 	} else if sess.Folder != "" {
@@ -70,7 +75,7 @@ func (s *Service) ingestTurn(tx store.Tx, settings Settings, ev *capture.TurnEve
 			sess.GitRemote = remote
 		}
 	}
-	applyProject(settings.Rules, sess, parent)
+	applyProject(settings, sess, parent)
 	if err = tx.UpsertSession(sess); err != nil {
 		return err
 	}
@@ -154,7 +159,10 @@ func (s *Service) resolveSession(tx store.Tx, settings Settings, ev *capture.Tur
 	synthetic := false
 	if id == "" {
 		synthetic = true
-		found, err := tx.FindSyntheticSession(keyLabel, derived.Client, derived.Folder, ev.StartedAt.Add(-syntheticSessionGap))
+		found, err := tx.FindSyntheticSession(store.SyntheticKey{
+			KeyLabel: keyLabel, Client: derived.Client, Folder: derived.Folder,
+			HeaderProject: derived.HeaderProject, PathProject: derived.PathProject, GitRemote: derived.GitRemote,
+		}, ev.StartedAt.Add(-syntheticSessionGap))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -215,6 +223,9 @@ func (s *Service) resolveSession(tx store.Tx, settings Settings, ev *capture.Tur
 	if derived.HeaderProject != "" {
 		sess.HeaderProject = derived.HeaderProject
 	}
+	if derived.PathProject != "" {
+		sess.PathProject = derived.PathProject
+	}
 	if ev.Model != "" {
 		sess.Model = ev.Model
 	}
@@ -224,11 +235,9 @@ func (s *Service) resolveSession(tx store.Tx, settings Settings, ev *capture.Tur
 	return sess, parent, nil
 }
 
-// applyProject resolves the project, first match wins: X-CPA-Project, a config
-// rule, the git remote, the folder itself, the parent session, the project of
-// earlier turns, else "unassigned".
-func applyProject(rules []ProjectRule, sess *store.Session, parent *store.Session) {
-	name, key, source, rule := resolveProject(rules, sess, parent)
+// applyProject resolves the project of a session and stores it with its source.
+func applyProject(settings Settings, sess *store.Session, parent *store.Session) {
+	name, key, source, rule := resolveProject(settings, sess, parent)
 	sess.ProjectName = name
 	sess.ProjectKey = key
 	sess.ProjectSource = source
@@ -236,37 +245,57 @@ func applyProject(rules []ProjectRule, sess *store.Session, parent *store.Sessio
 	sess.ProjectID = ProjectID(name)
 }
 
-// Project sources.
+// Project sources, as stored per session and shown as "project_source".
 const (
-	SourceHeader   = "header"
-	SourceRule     = "rule"
-	SourceGit      = "git"
-	SourceFolder   = "folder"
-	SourceInherit  = "inherit"
-	SourceNone     = "none"
-	UnassignedName = "unassigned"
+	SourceHeader    = "header"
+	SourcePath      = "path"
+	SourceRule      = "rule"
+	SourceRemote    = "remote"
+	SourceFolder    = "folder"
+	SourceInherited = "inherited"
+	SourceNone      = "none"
+	UnassignedName  = "unassigned"
 )
 
-func resolveProject(rules []ProjectRule, sess *store.Session, parent *store.Session) (name, key, source, rule string) {
+// legacySourceInherit is the old spelling of SourceInherited in stored rows.
+const legacySourceInherit = "inherit"
+
+// resolveProject picks the project of a session. The first match wins:
+//
+//  1. X-CPA-Project header (header)
+//  2. /p/<project> in the base URL (path)
+//  3. a config rule that matches the folder (rule)
+//  4. the git remote (remote)
+//  5. the folder name, unless the folder is inside a worktree container (folder)
+//  6. the parent session, or an earlier turn of this session (inherited)
+//  7. else "unassigned" (none)
+func resolveProject(settings Settings, sess *store.Session, parent *store.Session) (name, key, source, rule string) {
 	if sess.HeaderProject != "" {
 		return sess.HeaderProject, sess.HeaderProject, SourceHeader, ""
 	}
+	if sess.PathProject != "" {
+		return sess.PathProject, sess.PathProject, SourcePath, ""
+	}
 	if sess.Folder != "" {
-		for _, r := range rules {
+		for _, r := range settings.Rules {
 			if project, ok := r.Apply(sess.Folder); ok {
 				return project, project, SourceRule, r.Match
 			}
 		}
-		if sess.GitRemote != "" {
-			return extract.ProjectNameFromRemote(sess.GitRemote), sess.GitRemote, SourceGit, ""
-		}
+	}
+	if sess.GitRemote != "" {
+		return extract.ProjectNameFromRemote(sess.GitRemote), sess.GitRemote, SourceRemote, ""
+	}
+	if sess.Folder != "" && !settings.IsWorktreeFolder(sess.Folder) {
 		return extract.ProjectNameFromFolder(sess.Folder), sess.Folder, SourceFolder, ""
 	}
 	if parent != nil && parent.ProjectName != "" && parent.ProjectName != UnassignedName {
-		return parent.ProjectName, parent.ProjectKey, SourceInherit, ""
+		return parent.ProjectName, parent.ProjectKey, SourceInherited, ""
 	}
-	if sess.ProjectName != "" && sess.ProjectName != UnassignedName && sess.ProjectSource != SourceRule {
-		return sess.ProjectName, sess.ProjectKey, sess.ProjectSource, sess.ProjectRule
+	// Only an inherited project stays without a signal of its own. Every other
+	// source is derived again from the stored signals, so a stale name goes away.
+	if sess.ProjectName != "" && sess.ProjectName != UnassignedName && (sess.ProjectSource == SourceInherited || sess.ProjectSource == legacySourceInherit) {
+		return sess.ProjectName, sess.ProjectKey, SourceInherited, ""
 	}
 	return UnassignedName, UnassignedName, SourceNone, ""
 }

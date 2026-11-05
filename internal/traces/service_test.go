@@ -166,16 +166,24 @@ func TestProjectRulesAndResolution(t *testing.T) {
 		parent     *store.Session
 		name, from string
 	}
+	settings := SettingsFromConfig(nil)
+	settings.Rules = rules
 	for _, tc := range []c{
 		{store.Session{HeaderProject: "hdr", Folder: "~/code/app"}, nil, "hdr", SourceHeader},
+		{store.Session{HeaderProject: "hdr", PathProject: "pth"}, nil, "hdr", SourceHeader},
+		{store.Session{PathProject: "pth", Folder: "~/code/app", GitRemote: "github.com/a/b"}, nil, "pth", SourcePath},
 		{store.Session{Folder: "~/code/app", GitRemote: "github.com/a/b"}, nil, "app", SourceRule},
-		{store.Session{Folder: "~/other/x", GitRemote: "github.com/a/b"}, nil, "b", SourceGit},
+		{store.Session{Folder: "~/other/x", GitRemote: "github.com/a/b"}, nil, "b", SourceRemote},
+		{store.Session{GitRemote: "github.com/a/b"}, nil, "b", SourceRemote},
 		{store.Session{Folder: "~/other/x"}, nil, "x", SourceFolder},
-		{store.Session{}, parent, "parent-proj", SourceInherit},
-		{store.Session{ProjectName: "earlier", ProjectSource: SourceFolder}, nil, "earlier", SourceFolder},
+		{store.Session{}, parent, "parent-proj", SourceInherited},
+		{store.Session{ProjectName: "earlier", ProjectSource: SourceInherited}, nil, "earlier", SourceInherited},
+		{store.Session{ProjectName: "earlier", ProjectSource: legacySourceInherit}, nil, "earlier", SourceInherited},
+		// A name from any other source is derived again, so a stale name goes away.
+		{store.Session{ProjectName: "stale", ProjectSource: SourceFolder}, nil, UnassignedName, SourceNone},
 		{store.Session{}, nil, UnassignedName, SourceNone},
 	} {
-		name, _, source, _ := resolveProject(rules, &tc.sess, tc.parent)
+		name, _, source, _ := resolveProject(settings, &tc.sess, tc.parent)
 		if name != tc.name || source != tc.from {
 			t.Errorf("resolveProject(%+v) = %s/%s, want %s/%s", tc.sess, name, source, tc.name, tc.from)
 		}

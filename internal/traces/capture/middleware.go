@@ -20,7 +20,7 @@ const (
 
 // Middleware creates a turn for each model request, keeps a copy of the reply
 // as written to the client, and submits the turn when the handler returns.
-// It always removes the X-CPA-* trace headers so they never reach an upstream.
+// It always removes the X-CPA-* request headers so they never reach an upstream.
 func Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		req := c.Request
@@ -29,6 +29,12 @@ func Middleware() gin.HandlerFunc {
 			return
 		}
 		clientHeaders := takeClientHeaders(req.Header)
+		if project := PathProjectFrom(req.Context()); project != "" {
+			if clientHeaders == nil {
+				clientHeaders = make(http.Header, 1)
+			}
+			clientHeaders.Set(HeaderPathProject, project)
+		}
 		sink := current()
 		if sink == nil {
 			c.Next()
@@ -117,21 +123,45 @@ func ginAPIKey(c *gin.Context) string {
 	}
 }
 
+// keptHeaders are X-CPA-* request headers that other code of the proxy reads
+// from the request, so they stay on it. They are not trace hints.
+var keptHeaders = map[string]bool{
+	"X-Cpa-Claude-Workload": true,
+}
+
+// takeClientHeaders removes every X-CPA-* header from h (names compare without
+// case) and returns the trace hints among them: the known client headers.
+// Unknown X-CPA-* headers are dropped. HeaderPathProject is set by the proxy
+// only, so a client value is dropped too.
 func takeClientHeaders(h http.Header) http.Header {
 	if h == nil {
 		return nil
 	}
 	var out http.Header
-	for _, name := range []string{HeaderProject, HeaderCwd, HeaderClient} {
-		if values := h.Values(name); len(values) > 0 {
-			if out == nil {
-				out = make(http.Header, 3)
-			}
-			out[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
-			h.Del(name)
+	for name, values := range h {
+		canonical := http.CanonicalHeaderKey(name)
+		if !strings.HasPrefix(strings.ToUpper(canonical), HeaderPrefix) || keptHeaders[canonical] {
+			continue
 		}
+		delete(h, name)
+		if !isClientHint(canonical) || len(values) == 0 {
+			continue
+		}
+		if out == nil {
+			out = make(http.Header, 4)
+		}
+		out[canonical] = append(out[canonical], values...)
 	}
 	return out
+}
+
+func isClientHint(canonical string) bool {
+	switch canonical {
+	case http.CanonicalHeaderKey(HeaderProject), http.CanonicalHeaderKey(HeaderCwd),
+		http.CanonicalHeaderKey(HeaderClient), http.CanonicalHeaderKey(HeaderGitRemote):
+		return true
+	}
+	return false
 }
 
 func mergeHeaders(dst, src http.Header) {

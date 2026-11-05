@@ -106,7 +106,7 @@ FROM turns t JOIN sessions s ON s.id = t.session_id LEFT JOIN sessions r ON r.id
 		var synthetic int
 		var started, last int64
 		dest := turnDest(&t, &aux)
-		dest = append(dest, &sess.ID, &sess.RootID, &sess.ParentID, &sess.Title, &sess.ProjectID, &sess.ProjectName, &sess.ProjectKey, &sess.ProjectSource, &sess.ProjectRule, &sess.HeaderProject, &sess.Folder, &sess.GitRemote, &sess.ClientProjectHash, &sess.Client, &sess.ClientVersion, &sess.KeyLabel, &tags, &sess.Machine, &sess.ClientIP, &sess.DeviceID, &sess.Model, &synthetic, &started, &last, &t.RootTitle)
+		dest = append(dest, &sess.ID, &sess.RootID, &sess.ParentID, &sess.Title, &sess.ProjectID, &sess.ProjectName, &sess.ProjectKey, &sess.ProjectSource, &sess.ProjectRule, &sess.HeaderProject, &sess.PathProject, &sess.Folder, &sess.GitRemote, &sess.ClientProjectHash, &sess.Client, &sess.ClientVersion, &sess.KeyLabel, &tags, &sess.Machine, &sess.ClientIP, &sess.DeviceID, &sess.Model, &synthetic, &started, &last, &t.RootTitle)
 		if err = rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("scan turn: %w", err)
 		}
@@ -164,13 +164,14 @@ func (s *SQLite) AllSessions(ctx context.Context) ([]Session, error) {
 	return s.sessionsWhere(ctx, "")
 }
 
-// UpdateSessionProjects stores re-resolved project fields.
+// UpdateSessionProjects stores re-resolved project fields, and the folder and
+// title that a re-derivation fixed.
 func (s *SQLite) UpdateSessionProjects(ctx context.Context, sessions []Session) error {
 	return s.Write(ctx, func(tx Tx) error {
 		st := tx.(*sqliteTx)
 		for _, sess := range sessions {
-			if _, err := st.tx.ExecContext(ctx, `UPDATE sessions SET project_id=?, project_name=?, project_key=?, project_source=?, project_rule=?, git_remote=? WHERE id = ?`,
-				sess.ProjectID, sess.ProjectName, sess.ProjectKey, sess.ProjectSource, sess.ProjectRule, sess.GitRemote, sess.ID); err != nil {
+			if _, err := st.tx.ExecContext(ctx, `UPDATE sessions SET project_id=?, project_name=?, project_key=?, project_source=?, project_rule=?, git_remote=?, folder=?, title=? WHERE id = ?`,
+				sess.ProjectID, sess.ProjectName, sess.ProjectKey, sess.ProjectSource, sess.ProjectRule, sess.GitRemote, sess.Folder, sess.Title, sess.ID); err != nil {
 				return err
 			}
 		}

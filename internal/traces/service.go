@@ -139,7 +139,7 @@ func (s *Service) Apply(cfg *config.Config) {
 		log.Warnf("traces: dir changed to %s; restart the proxy to use it (still writing to %s)", next.Dir, s.dir)
 	}
 	s.queue.setLimits(next.QueueSize, next.MaxStreamCapture)
-	if !reflect.DeepEqual(prev.Rules, next.Rules) {
+	if !reflect.DeepEqual(prev.Rules, next.Rules) || !reflect.DeepEqual(prev.Worktrees, next.Worktrees) {
 		s.requestReresolve()
 	}
 	if prev.PriceSource != next.PriceSource || prev.PriceRefresh != next.PriceRefresh {
@@ -368,15 +368,17 @@ func (s *Service) maintenanceLoop(ctx context.Context, st store.Store, reresolve
 	defer first.Stop()
 	ticker := time.NewTicker(retentionPeriod)
 	defer ticker.Stop()
+	// Stored sessions from older versions get their folder, title and project
+	// derived again once. The job runs here, so start-up and requests do not wait for it.
+	if !rederiveDone(ctx, st) {
+		s.runReresolve(ctx, st)
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-reresolve:
-			// Use st directly: taking s.mu here could deadlock with Apply stopping this loop.
-			if err := reresolveProjects(ctx, st, s.Settings().Rules); err != nil {
-				log.WithError(err).Warn("traces: project re-resolution failed")
-			}
+			s.runReresolve(ctx, st)
 		case <-first.C:
 			s.runRetention(ctx, st)
 		case <-ticker.C:
