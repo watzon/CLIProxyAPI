@@ -31,43 +31,41 @@ func (s *SQLite) QueryTurns(ctx context.Context, f TurnFilter) ([]Turn, error) {
 		where = append(where, "t.started_at < ?")
 		args = append(args, ms(f.To))
 	}
-	if f.Project != "" {
-		where = append(where, "(s.project_id = ? OR s.project_name = ?)")
-		args = append(args, f.Project, f.Project)
+	// anyOf adds one condition that matches when any value matches.
+	anyOf := func(values []string, match func(v string) (string, []any)) {
+		if len(values) == 0 {
+			return
+		}
+		parts := make([]string, 0, len(values))
+		for _, v := range values {
+			clause, clauseArgs := match(v)
+			parts = append(parts, clause)
+			args = append(args, clauseArgs...)
+		}
+		where = append(where, "("+strings.Join(parts, " OR ")+")")
 	}
-	if f.Folder != "" {
-		prefix := strings.TrimRight(f.Folder, "/")
-		where = append(where, "(s.folder = ? OR instr(s.folder, ?) = 1)")
-		args = append(args, prefix, prefix+"/")
-	}
-	if f.Client != "" {
-		where = append(where, "s.client = ?")
-		args = append(args, f.Client)
-	}
-	if f.Model != "" {
-		where = append(where, "(t.model = ? OR t.served_model = ?)")
-		args = append(args, f.Model, f.Model)
-	}
-	if f.Key != "" {
-		where = append(where, "s.key_label = ?")
-		args = append(args, f.Key)
-	}
-	if f.Tag == UntaggedFilter {
-		where = append(where, "s.tags = '[]'")
-	} else if f.Tag != "" {
+	anyOf(f.Project, func(v string) (string, []any) {
+		return "s.project_id = ? OR s.project_name = ?", []any{v, v}
+	})
+	anyOf(f.Folder, func(v string) (string, []any) {
+		prefix := strings.TrimRight(v, "/")
+		return "s.folder = ? OR instr(s.folder, ?) = 1", []any{prefix, prefix + "/"}
+	})
+	anyOf(f.Client, func(v string) (string, []any) { return "s.client = ?", []any{v} })
+	anyOf(f.Model, func(v string) (string, []any) {
+		return "t.model = ? OR t.served_model = ?", []any{v, v}
+	})
+	anyOf(f.Key, func(v string) (string, []any) { return "s.key_label = ?", []any{v} })
+	anyOf(f.Tag, func(v string) (string, []any) {
+		if v == UntaggedFilter {
+			return "s.tags = '[]'", nil
+		}
 		// Tags are stored as a JSON list; match the quoted tag.
-		quoted := encodeList([]string{f.Tag})
-		where = append(where, "instr(s.tags, ?) > 0")
-		args = append(args, quoted[1:len(quoted)-1])
-	}
-	if f.Account != "" {
-		where = append(where, "t.account = ?")
-		args = append(args, f.Account)
-	}
-	if f.Machine != "" {
-		where = append(where, "s.machine = ?")
-		args = append(args, f.Machine)
-	}
+		quoted := encodeList([]string{v})
+		return "instr(s.tags, ?) > 0", []any{quoted[1 : len(quoted)-1]}
+	})
+	anyOf(f.Account, func(v string) (string, []any) { return "t.account = ?", []any{v} })
+	anyOf(f.Machine, func(v string) (string, []any) { return "s.machine = ?", []any{v} })
 	switch f.Status {
 	case "ok":
 		where = append(where, "t.status <> 'error'")

@@ -178,22 +178,23 @@ type Account struct {
 	Plan         string
 }
 
-// UntaggedFilter as TurnFilter.Tag selects sessions without tags. It is the
+// UntaggedFilter as a TurnFilter.Tag value selects sessions without tags. It is the
 // stats group key of untagged sessions.
 const UntaggedFilter = "__untagged__"
 
-// TurnFilter selects turns. Empty fields do not filter.
+// TurnFilter selects turns. Empty fields do not filter. A turn matches a list
+// field when it matches any of its values, and it must match every field.
 type TurnFilter struct {
 	From       time.Time
 	To         time.Time
-	Project    string
-	Folder     string
-	Client     string
-	Model      string
-	Key        string
-	Tag        string
-	Account    string
-	Machine    string
+	Project    []string
+	Folder     []string
+	Client     []string
+	Model      []string
+	Key        []string
+	Tag        []string
+	Account    []string
+	Machine    []string
 	Status     string
 	Query      string
 	SessionIDs []string

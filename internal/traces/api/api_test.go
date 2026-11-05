@@ -321,6 +321,30 @@ func TestBadRequestsAndNotFound(t *testing.T) {
 	}
 }
 
+func TestFilterFieldsTakeSeveralValues(t *testing.T) {
+	engine, svc, _ := setup(t, true)
+	seed(t, svc)
+	for path, want := range map[string]float64{
+		"/traces/sessions?project=shop":                 1,
+		"/traces/sessions?project=nope":                 0,
+		"/traces/sessions?project=nope&project=shop":    1,
+		"/traces/sessions?project=shop&project=shop":    1,
+		"/traces/sessions?project=shop&machine=nowhere": 0,
+		"/traces/sessions?project=+shop+&project=":      1,
+	} {
+		if got := getObject(t, engine, path)["total"]; got != want {
+			t.Errorf("GET %s total = %v, want %v", path, got, want)
+		}
+	}
+	tooMany := "/traces/sessions?tag=a"
+	for i := 0; i < 50; i++ {
+		tooMany += fmt.Sprintf("&tag=t%d", i)
+	}
+	if code, body := call(t, engine, http.MethodGet, tooMany, ""); code != http.StatusBadRequest || !strings.Contains(string(body), "too_many_values") {
+		t.Errorf("51 tag values = %d %s, want 400 too_many_values", code, body)
+	}
+}
+
 func TestDisabledEndpointsAnswerEmpty(t *testing.T) {
 	engine, _, _ := setup(t, false)
 	if health := getObject(t, engine, "/traces/health"); health["enabled"] != false {

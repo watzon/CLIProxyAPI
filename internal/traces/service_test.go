@@ -390,29 +390,40 @@ func TestMetadataCaptureStoresNoContent(t *testing.T) {
 	}
 	window := store.TurnFilter{From: t0.Add(-time.Hour), To: t0.Add(time.Hour)}
 	tagged := window
-	tagged.Tag = "gold"
+	tagged.Tag = []string{"gold"}
 	list, err := svc.Sessions(context.Background(), tagged, SessionQuery{Limit: 10})
 	if err != nil || list.Total != 1 || list.Sessions[0].ID != "meta2" || list.Sessions[0].Tags[0] != "gold" || list.Sessions[0].KeyLabel != KeyLabel("vip") {
 		t.Errorf("tag filter = %+v %v", list, err)
 	}
 	untagged := window
-	untagged.Tag = GroupUntagged
+	untagged.Tag = []string{GroupUntagged}
 	if list, _ = svc.Sessions(context.Background(), untagged, SessionQuery{Limit: 10}); list.Total != 1 || list.Sessions[0].ID != "meta" {
 		t.Errorf("untagged filter = %+v", list.Sessions)
 	}
 	byKey := window
-	byKey.Key = KeyLabel("vip")
+	byKey.Key = []string{KeyLabel("vip")}
 	if list, _ = svc.Sessions(context.Background(), byKey, SessionQuery{Limit: 10}); list.Total != 1 {
 		t.Errorf("key filter total = %d", list.Total)
 	}
 	byFolder := window
-	byFolder.Folder = "~/code"
+	byFolder.Folder = []string{"~/code"}
 	if list, _ = svc.Sessions(context.Background(), byFolder, SessionQuery{Limit: 10}); list.Total != 2 {
 		t.Errorf("folder prefix filter total = %d", list.Total)
 	}
-	byFolder.Folder = "~/cod"
+	byFolder.Folder = []string{"~/cod"}
 	if list, _ = svc.Sessions(context.Background(), byFolder, SessionQuery{Limit: 10}); list.Total != 0 {
 		t.Errorf("folder prefix must match whole segments, total = %d", list.Total)
+	}
+	eitherTag := window
+	eitherTag.Tag = []string{"gold", GroupUntagged}
+	if list, _ = svc.Sessions(context.Background(), eitherTag, SessionQuery{Limit: 10}); list.Total != 2 {
+		t.Errorf("two tag values must match either one, total = %d", list.Total)
+	}
+	tagAndFolder := eitherTag
+	tagAndFolder.Tag = []string{"gold"}
+	tagAndFolder.Folder = []string{"~/elsewhere", "~/code"}
+	if list, _ = svc.Sessions(context.Background(), tagAndFolder, SessionQuery{Limit: 10}); list.Total != 1 || list.Sessions[0].ID != "meta2" {
+		t.Errorf("fields must all match, values of one field any: %+v", list.Sessions)
 	}
 }
 
@@ -722,7 +733,7 @@ func TestProjectIDMatchesStatsKeyAndFilter(t *testing.T) {
 	}
 	for id, want := range map[string]string{"unassigned": "loose", ids["alpha"]: "alpha"} {
 		f := window
-		f.Project = id
+		f.Project = []string{id}
 		list, errList := svc.Sessions(ctx, f, SessionQuery{Limit: 10})
 		if errList != nil || list.Total != 1 || list.Sessions[0].ID != want {
 			t.Errorf("project=%s sessions = %+v %v", id, list.Sessions, errList)

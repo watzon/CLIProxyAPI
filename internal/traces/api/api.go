@@ -101,19 +101,48 @@ func (h *Handler) filter(c *gin.Context) (store.TurnFilter, bool) {
 		fail(c, http.StatusBadRequest, "invalid_status", "status must be ok or error")
 		return store.TurnFilter{}, false
 	}
-	return store.TurnFilter{
+	f := store.TurnFilter{
 		From: from.UTC(), To: to.UTC(),
-		Project: strings.TrimSpace(c.Query("project")),
-		Folder:  strings.TrimSpace(c.Query("folder")),
-		Client:  strings.TrimSpace(c.Query("client")),
-		Model:   strings.TrimSpace(c.Query("model")),
-		Key:     strings.TrimSpace(c.Query("key")),
-		Tag:     strings.TrimSpace(c.Query("tag")),
-		Account: strings.TrimSpace(c.Query("account")),
-		Machine: strings.TrimSpace(c.Query("machine")),
-		Status:  status,
-		Query:   strings.TrimSpace(c.Query("q")),
-	}, true
+		Status: status,
+		Query:  strings.TrimSpace(c.Query("q")),
+	}
+	for _, field := range []struct {
+		name string
+		dst  *[]string
+	}{
+		{"project", &f.Project}, {"folder", &f.Folder}, {"client", &f.Client}, {"model", &f.Model},
+		{"key", &f.Key}, {"tag", &f.Tag}, {"account", &f.Account}, {"machine", &f.Machine},
+	} {
+		values, ok := listQuery(c, field.name)
+		if !ok {
+			return store.TurnFilter{}, false
+		}
+		*field.dst = values
+	}
+	return f, true
+}
+
+// maxFilterValues bounds the values of one filter field in a request.
+const maxFilterValues = 50
+
+// listQuery reads a filter field that may repeat (?tag=a&tag=b). Blank and
+// repeated values are dropped.
+func listQuery(c *gin.Context, name string) ([]string, bool) {
+	var out []string
+	seen := map[string]bool{}
+	for _, v := range c.QueryArray(name) {
+		v = strings.TrimSpace(v)
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	if len(out) > maxFilterValues {
+		fail(c, http.StatusBadRequest, "too_many_values", fmt.Sprintf("%s takes at most %d values", name, maxFilterValues))
+		return nil, false
+	}
+	return out, true
 }
 
 func intQuery(c *gin.Context, name string, def, maxValue int) (int, bool) {
