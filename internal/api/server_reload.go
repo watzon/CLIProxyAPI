@@ -190,6 +190,7 @@ func (s *Server) UpdateClientsContext(ctx context.Context, cfg *config.Config) b
 	}
 	githubauth.SetToken(cfg.GitHubToken)
 	managementasset.SetCurrentConfig(cfg)
+	s.applyTracesConfig(cfg)
 	if errContext := ctx.Err(); errContext != nil {
 		return false
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/traces/capture"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -892,6 +893,7 @@ func (h *OpenAIResponsesAPIHandler) ResponsesWebsocket(c *gin.Context) {
 		if executionAuthID != "" && !isPluginExecutorRoute {
 			cliCtx = handlers.WithPinnedAuthID(cliCtx, executionAuthID)
 		}
+		cliCtx, traceTurn := capture.BeginWebsocketTurn(cliCtx, c)
 		dataChan, _, errChan := h.ExecuteStreamWithAuthManager(cliCtx, h.HandlerType(), modelName, requestJSON, "")
 		if !selectedAuthObserved {
 			// Plugin/alternate routes bypass auth selection. Keep canonical HTTP-mode
@@ -941,6 +943,7 @@ func (h *OpenAIResponsesAPIHandler) ResponsesWebsocket(c *gin.Context) {
 				},
 			},
 		)
+		traceTurn.FinishWebsocketTurn(completedOutput, forwardErrMsg, errForward)
 		if errForward != nil {
 			wsTerminateErr = errForward
 			switch {

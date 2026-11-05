@@ -925,7 +925,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			}
 			m.mu.Unlock()
 			releaseMutation()
-			m.hook.OnResult(ctx, result)
+			m.emitResult(ctx, result)
 			m.publishErrorEvent(result, nil)
 			return
 		}
@@ -1417,7 +1417,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 		reg.ApplyClientModelProjections(result.AuthID, regEpoch, authSnapshot.Generation, projections)
 	}
 
-	m.hook.OnResult(ctx, result)
+	m.emitResult(ctx, result)
 	m.publishErrorEvent(result, authSnapshot)
 	m.updateSessionAffinity(result)
 }
@@ -1462,7 +1462,7 @@ func (m *Manager) reportHomeResult(ctx context.Context, result Result, auth *Aut
 	if auth != nil {
 		snapshot = auth.Clone()
 	}
-	m.hook.OnResult(ctx, result)
+	m.emitResult(ctx, result)
 	m.publishErrorEvent(result, snapshot)
 	m.updateSessionAffinity(result)
 }
@@ -1480,7 +1480,7 @@ func (m *Manager) recordAvailabilityNeutralResult(ctx context.Context, result Re
 		if isStaleExecutionResult(result, auth) {
 			m.mu.Unlock()
 			releaseMutation()
-			m.hook.OnResult(ctx, result)
+			m.emitResult(ctx, result)
 			m.publishErrorEvent(result, nil)
 			return
 		}
@@ -1499,7 +1499,7 @@ func (m *Manager) recordAvailabilityNeutralResult(ctx context.Context, result Re
 	m.mu.Unlock()
 	releaseMutation()
 
-	m.hook.OnResult(ctx, result)
+	m.emitResult(ctx, result)
 	m.publishErrorEvent(result, authSnapshot)
 }
 

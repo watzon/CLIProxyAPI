@@ -65,6 +65,7 @@ func (h *Handler) ConfigV8(c *gin.Context) {
 				}
 			}
 			h.injectV8APIKeyAuthIndexesLocked(root, data)
+			tracesConfigView(root, parts)
 		}
 		value := configV8Node(root, parts)
 		if value == nil {
@@ -153,6 +154,7 @@ func (h *Handler) ConfigV8(c *gin.Context) {
 	}
 	if !yamlRequest && c.Request.Method != http.MethodDelete {
 		preserveV8TURNSecrets(root, before)
+		preserveTracesCaptureKeys(root, before)
 	}
 	// Revisions are owned by Home and must not become ordinary editable settings.
 	for _, field := range []string{"credentials/concurrency/lifecycle-config-revision", "credentials/concurrency/observation-barrier-revision", "plugins/auth-revision"} {

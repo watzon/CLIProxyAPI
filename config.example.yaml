@@ -1272,6 +1272,66 @@ observability:
     enable: false
     addr: "127.0.0.1:8316"
 
+# Request traces: tokens, API-equivalent cost and active time per project, plus each
+# conversation (messages, tool calls, diffs, errors, retries). Off by default.
+# The Management API serves them under /v8/management/traces. Every key except
+# dir applies on hot reload. Recording never blocks or fails a client request.
+# Clients may send X-CPA-Project, X-CPA-Cwd and X-CPA-Client; the proxy reads them
+# and never forwards them upstream.
+traces:
+  enabled: false
+  # Database folder. A relative path is under auth-dir. The proxy creates it with
+  # owner-only permissions (0700). On Windows the folder keeps the default ACL of
+  # the user profile, which already limits access to the owner.
+  dir: "traces"
+  # metadata stores tokens, cost, timing, folders and titles; full also stores
+  # message content (prompts, replies, tool calls and results).
+  capture: metadata
+  # Per client key capture level, for example:
+  # capture-by-key:
+  #   "your-api-key-1": full
+  capture-by-key: {}
+  # Pauses between turns up to this long count as active time.
+  idle-gap: 10m
+  # Events waiting to be written. When the queue fills, content is dropped
+  # first and metadata is kept.
+  queue-size: 10000
+  # Reply bytes kept per turn for content.
+  max-stream-capture: 8MB
+  retention:
+    # Message content older than this is deleted; metadata rows stay.
+    # Accepts Go durations plus a "d" suffix.
+    content-max-age: 365d
+    # When stored content grows past this size, the oldest content is deleted.
+    content-max-size: 20GB
+  # Replace API keys, tokens and private keys in stored content with [redacted:<kind>].
+  redact-secrets: true
+  prices:
+    # Price catalog URL. Set to "" to use only the overrides below.
+    source: "https://models.dev/api.json"
+    refresh: 24h
+    # USD per 1M tokens. Overrides win over the catalog; model may use * globs.
+    # overrides:
+    #   - model: "my-local-model*"
+    #     input: 0
+    #     output: 0
+    #     cache-read: 0
+    #     cache-write-5m: 0
+    #     cache-write-1h: 0
+    overrides: []
+  projects:
+    # Folder to project rules, first match wins. {name} captures one path segment.
+    # A rule without {name} matches the folder and everything under it.
+    # rules:
+    #   - match: "~/code/{name}"
+    #     project: "{name}"
+    rules: []
+  # Machine labels by client IP or CIDR, for example:
+  # client-labels:
+  #   "10.0.0.5": "desk"
+  #   "100.64.0.0/10": "tailnet"
+  client-labels: {}
+
 # Standard dynamic library plugins are trusted in-process code. They are disabled by default.
 # Build Go examples with go build -buildmode=c-shared for the target GOOS/GOARCH.
 # Other languages can implement the same C ABI and JSON method protocol.

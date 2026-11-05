@@ -54,6 +54,9 @@ type Config struct {
 	// Plugins configures dynamic plugin discovery and per-plugin settings.
 	Plugins PluginsConfig `yaml:"plugins" json:"plugins"`
 
+	// Traces configures request tracing (sessions, turns, cost, content).
+	Traces TracesConfig `yaml:"traces,omitempty" json:"traces"`
+
 	// AuthDir is the directory where authentication token files are stored.
 	AuthDir string `yaml:"auth-dir" json:"-"`
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/api/handlers/management"
+	tracesapi "github.com/router-for-me/CLIProxyAPI/v8/internal/traces/api"
 )
 
 // registerManagementV8Routes defines the v8 contract independently of v0.
@@ -67,4 +68,6 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/plugins/:id/quota", s.mgmt.GetPluginQuota)
 	v8.POST("/plugins/:id/quota", s.mgmt.FetchPluginQuota)
 	v8.DELETE("/plugins/:id/quota", s.mgmt.ResetPluginQuota)
+
+	tracesapi.New(s.traces, s.mgmt).Register(v8)
 }
