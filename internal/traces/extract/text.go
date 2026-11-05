@@ -11,9 +11,12 @@ const MaxTitleLength = 120
 
 var (
 	// Client-injected wrappers that are not part of what the user typed.
-	reWrapperBlocks = regexp.MustCompile(`(?s)<(system-reminder|environment_context|user_instructions|INSTRUCTIONS|permissions instructions|local-command-stdout|local-command-stderr|command-message|user-prompt-submit-hook)>.*?</(?:system-reminder|environment_context|user_instructions|INSTRUCTIONS|permissions instructions|local-command-stdout|local-command-stderr|command-message|user-prompt-submit-hook)>`)
+	reWrapperBlocks = regexp.MustCompile(`(?s)<(system-reminder|environment_context|user_instructions|INSTRUCTIONS|permissions instructions|local-command-caveat|local-command-stdout|local-command-stderr|command-message|user-prompt-submit-hook)>.*?</(?:system-reminder|environment_context|user_instructions|INSTRUCTIONS|permissions instructions|local-command-caveat|local-command-stdout|local-command-stderr|command-message|user-prompt-submit-hook)>`)
 	reCommandName   = regexp.MustCompile(`(?s)<command-name>(.*?)</command-name>`)
 	reCommandArgs   = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
+	// reContextHandoff matches a summary that a client (T3 Code) sends when it
+	// moves a thread to another provider. It is context, not a user prompt.
+	reContextHandoff = regexp.MustCompile(`^<session>\s*Context handoff`)
 )
 
 // compactionPrefix starts the first prompt of a session that the client
@@ -31,6 +34,14 @@ var injectedPrefixes = []string{
 // sends after it compacted a conversation.
 func IsCompactionText(text string) bool {
 	return strings.HasPrefix(strings.TrimSpace(text), compactionPrefix)
+}
+
+// NeedsTitle reports whether a stored session title is missing or came from
+// text that is not a user prompt: a compaction summary, the first line of a
+// context handoff, or a local command caveat. Such a title is chosen again.
+func NeedsTitle(title string) bool {
+	t := strings.TrimSpace(title)
+	return t == "" || IsCompactionText(t) || t == "<session>" || strings.HasPrefix(t, "<local-command-caveat>")
 }
 
 // Title returns the first line of the first user prompt, without client
@@ -61,7 +72,7 @@ func titleFromText(text string) string {
 		cleaned = command
 	}
 	trimmed := strings.TrimSpace(cleaned)
-	if trimmed == "" || trimmed == "[image]" || strings.HasPrefix(trimmed, "# AGENTS.md instructions") || IsCompactionText(trimmed) {
+	if trimmed == "" || trimmed == "[image]" || strings.HasPrefix(trimmed, "# AGENTS.md instructions") || IsCompactionText(trimmed) || reContextHandoff.MatchString(trimmed) {
 		return ""
 	}
 	for _, prefix := range injectedPrefixes {

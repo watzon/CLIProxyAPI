@@ -46,7 +46,7 @@ func (s *Service) ingestTurn(tx store.Tx, settings Settings, ev *capture.TurnEve
 	if err != nil {
 		return err
 	}
-	if sess.Title == "" || extract.IsCompactionText(sess.Title) {
+	if extract.NeedsTitle(sess.Title) {
 		title := extract.Title(req.Messages)
 		if title == "" {
 			title = sess.Title

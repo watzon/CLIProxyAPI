@@ -16,7 +16,7 @@ const (
 	rederiveKey = "projects.rederive"
 	// rederiveVersion changes when the folder, title or project logic changes in a
 	// way that stored sessions need to see. The job runs once per version.
-	rederiveVersion = 1
+	rederiveVersion = 2
 	// rederiveMaxTurns bounds the turns of one session that the job reads.
 	rederiveMaxTurns = 5
 	// rederiveChunk bounds the sessions per turn query.
@@ -115,7 +115,7 @@ type rederived struct {
 }
 
 // rederiveSessions reads the stored request content of sessions that have no
-// folder or a compaction summary as title, and derives folder and title again
+// folder or a title that extract.NeedsTitle rejects, and derives folder and title again
 // with the current extractors. Sessions without stored content are skipped.
 func rederiveSessions(ctx context.Context, st store.Store, settings Settings, sessions []store.Session) (map[string]rederived, error) {
 	needs := map[string]*store.Session{}
@@ -123,7 +123,7 @@ func rederiveSessions(ctx context.Context, st store.Store, settings Settings, se
 	for i := range sessions {
 		sess := &sessions[i]
 		needFolder := sess.Folder == "" && extract.HasFolderExtractor(sess.Client)
-		needTitle := sess.Title == "" || extract.IsCompactionText(sess.Title)
+		needTitle := extract.NeedsTitle(sess.Title)
 		if needFolder || needTitle {
 			needs[sess.ID] = sess
 			ids = append(ids, sess.ID)
@@ -164,7 +164,7 @@ func rederiveSessions(ctx context.Context, st store.Store, settings Settings, se
 				}
 			}
 		}
-		if sess.Title == "" || extract.IsCompactionText(sess.Title) {
+		if extract.NeedsTitle(sess.Title) {
 			// The newest turn carries the longest history, so it holds the first real prompt.
 			for i := len(list) - 1; i >= 0 && i >= len(list)-rederiveMaxTurns; i-- {
 				req, errReq := storedRequest(ctx, st, list[i].ID)
