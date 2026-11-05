@@ -105,6 +105,12 @@ func TestTitleSkipsCompactionAndInjectedContext(t *testing.T) {
 	if got := Title(msgs); got != "Now add the retry logic" {
 		t.Errorf("Title = %q", got)
 	}
+	if got := Title([]Message{user("Context handoff (full_thread_summary):\nProvider context handoff.")}); got != "" {
+		t.Errorf("Title of an unwrapped handoff = %q, want empty", got)
+	}
+	if got := Title([]Message{user("<session>\nContext handoff (full_thread_summary):\nsummary\n</session>\n\nNow ship it")}); got != "Now ship it" {
+		t.Errorf("Title after a closed handoff block = %q", got)
+	}
 	if got := Title([]Message{user("<session> is a tag we render in the header")}); got != "<session> is a tag we render in the header" {
 		t.Errorf("Title of a real prompt that starts with <session> = %q", got)
 	}
@@ -122,8 +128,9 @@ func TestNeedsTitle(t *testing.T) {
 		"<session>": true,
 		"This session is being continued from a previous conversation that ran out": true,
 		"<local-command-caveat>Caveat: the messages below were generated":           true,
-		"Fix the login bug":  false,
-		"<session> is a tag": false,
+		"Context handoff (full_thread_summary):":                                    true,
+		"Fix the login bug":                                                         false,
+		"<session> is a tag":                                                        false,
 	} {
 		if got := NeedsTitle(title); got != want {
 			t.Errorf("NeedsTitle(%q) = %v, want %v", title, got, want)

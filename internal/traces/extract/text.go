@@ -16,7 +16,9 @@ var (
 	reCommandArgs   = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
 	// reContextHandoff matches a summary that a client (T3 Code) sends when it
 	// moves a thread to another provider. It is context, not a user prompt.
-	reContextHandoff = regexp.MustCompile(`^<session>\s*Context handoff`)
+	// The summary may come with or without its <session> wrapper.
+	reContextHandoff      = regexp.MustCompile(`^(?:<session>\s*)?Context handoff \(`)
+	reContextHandoffBlock = regexp.MustCompile(`(?s)<session>\s*Context handoff \(.*?</session>`)
 )
 
 // compactionPrefix starts the first prompt of a session that the client
@@ -41,7 +43,8 @@ func IsCompactionText(text string) bool {
 // context handoff, or a local command caveat. Such a title is chosen again.
 func NeedsTitle(title string) bool {
 	t := strings.TrimSpace(title)
-	return t == "" || IsCompactionText(t) || t == "<session>" || strings.HasPrefix(t, "<local-command-caveat>")
+	return t == "" || IsCompactionText(t) || t == "<session>" || strings.HasPrefix(t, "<local-command-caveat>") ||
+		reContextHandoff.MatchString(t)
 }
 
 // Title returns the first line of the first user prompt, without client
@@ -62,7 +65,8 @@ func Title(messages []Message) string {
 }
 
 func titleFromText(text string) string {
-	cleaned := reWrapperBlocks.ReplaceAllString(text, "")
+	cleaned := reContextHandoffBlock.ReplaceAllString(text, "")
+	cleaned = reWrapperBlocks.ReplaceAllString(cleaned, "")
 	if m := reCommandName.FindStringSubmatch(cleaned); m != nil {
 		// A slash command: show the command and its arguments.
 		command := strings.TrimSpace(m[1])

@@ -16,7 +16,7 @@ const (
 	rederiveKey = "projects.rederive"
 	// rederiveVersion changes when the folder, title or project logic changes in a
 	// way that stored sessions need to see. The job runs once per version.
-	rederiveVersion = 2
+	rederiveVersion = 3
 	// rederiveMaxTurns bounds the turns of one session that the job reads.
 	rederiveMaxTurns = 5
 	// rederiveChunk bounds the sessions per turn query.
